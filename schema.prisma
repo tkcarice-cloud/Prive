@@ -1,0 +1,115 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  password      String   // login password (bcrypt)
+  adminPinHash  String?  // admin PIN hash (argon2) - only present for admin user
+  name          String?
+  role          Role     @default(SUBSCRIBER)
+  createdAt     DateTime @default(now())
+  devices       Device[]
+  bookings      Booking[]
+}
+
+model Device {
+  id          String   @id @default(cuid())
+  user        User     @relation(fields: [userId], references: [id])
+  userId      String
+  deviceToken String
+  label       String?
+  createdAt   DateTime @default(now())
+  lastUsedAt  DateTime?
+}
+
+model Wallet {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  balanceCents Int      @default(0)
+  createdAt    DateTime @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  meta      String?
+  createdAt DateTime @default(now())
+}
+
+model OTP {
+  id        String   @id @default(cuid())
+  userId    String
+  code      String
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model Creator {
+  id                String   @id @default(cuid())
+  user              User     @relation(fields: [userId], references: [id])
+  userId            String   @unique
+  displayName       String
+  bio               String?
+  stripeAccountId   String?
+  monthlyPriceCents Int
+  callPriceMinCents Int
+  createdAt         DateTime @default(now())
+  bookings          Booking[]
+}
+
+model Booking {
+  id                    String        @id @default(cuid())
+  creator               Creator       @relation(fields: [creatorId], references: [id])
+  creatorId             String
+  user                  User          @relation(fields: [userId], references: [id])
+  userId                String
+  day                   DateTime
+  time                  String
+  durationMin           Int
+  priceCents            Int
+  status                BookingStatus @default(REQUESTED)
+  createdAt             DateTime      @default(now())
+  stripePaymentIntentId String?       @unique
+}
+
+model Payout {
+  id            String   @id @default(cuid())
+  initiatedById String?
+  amountCents   Int
+  currency      String   @default("usd")
+  stripePayoutId String?
+  type          PayoutType
+  destination   String?
+  status        String   @default("requested")
+  meta          String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+enum Role {
+  SUBSCRIBER
+  CREATOR
+  ADMIN
+}
+
+enum BookingStatus {
+  REQUESTED
+  CONFIRMED
+  REJECTED
+  CANCELLED
+  COMPLETED
+}
+
+enum PayoutType {
+  STRIPE_PAYOUT
+  TRANSFER
+}
