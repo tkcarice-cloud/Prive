@@ -1761,13 +1761,15 @@ async def create_content(
     if not creator:
         raise HTTPException(status_code=404, detail="Creator profile not found")
     
+    content_type_value = content_type.value if hasattr(content_type, 'value') else content_type
+    
     content_doc = {
         "id": str(uuid.uuid4()),
         "creator_id": creator["id"],
         "title": title,
         "description": description,
-        "content_type": content_type.value if hasattr(content_type, 'value') else content_type,
-        "price": price if (content_type == ContentType.PPV or content_type == "ppv") else None,
+        "content_type": content_type_value,
+        "price": price if content_type_value == "ppv" else None,
         "media_urls": media_urls,
         "thumbnail_url": media_urls[0] if media_urls else None,
         "is_pinned": False,
@@ -1777,6 +1779,9 @@ async def create_content(
     }
     
     await db.content.insert_one(content_doc)
+    
+    # Return without _id
+    content_doc.pop("_id", None)
     return content_doc
 
 @api_router.get("/content/feed")
