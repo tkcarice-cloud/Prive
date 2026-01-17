@@ -614,6 +614,10 @@ class PriveAPITester:
         messaging_ok = self.test_messaging_system()
         payment_ok = self.test_payment_system()
         admin_ok = self.test_admin_system()
+        super_admin_ok = self.test_super_admin_system()
+        referral_ok = self.test_referral_system()
+        encryption_ok = self.test_encryption_system()
+        stripe_ok = self.test_stripe_connect()
         
         # Print final results
         print("\n" + "="*60)
@@ -637,6 +641,10 @@ class PriveAPITester:
         print(f"   Messaging: {'✅' if messaging_ok else '❌'}")
         print(f"   Payments: {'✅' if payment_ok else '❌'}")
         print(f"   Admin Panel: {'✅' if admin_ok else '❌'}")
+        print(f"   Super Admin: {'✅' if super_admin_ok else '❌'}")
+        print(f"   Referral System: {'✅' if referral_ok else '❌'}")
+        print(f"   E2EE Encryption: {'✅' if encryption_ok else '❌'}")
+        print(f"   Stripe Connect: {'✅' if stripe_ok else '❌'}")
         
         return self.tests_passed == self.tests_run
 
