@@ -1723,7 +1723,7 @@ async def update_creator_profile(
     creator = await db.creators.find_one({"user_id": current_user["id"]}, {"_id": 0})
     if not creator:
         raise HTTPException(status_code=404, detail="Creator profile not found")
-    return CreatorProfile(**creator)
+    return creator
 
 @api_router.get("/discover")
 async def discover_creators(
