@@ -38,13 +38,12 @@ export const AuthProvider = ({ children }) => {
     return userData;
   };
 
-  const register = async (email, username, password, role = 'user') => {
-    const response = await axios.post(`${API}/auth/register`, { 
-      email, 
-      username, 
-      password, 
-      role 
-    });
+  const register = async (email, username, password, role = 'user', referralCode = null) => {
+    const payload = { email, username, password, role };
+    if (referralCode) {
+      payload.referral_code = referralCode;
+    }
+    const response = await axios.post(`${API}/auth/register`, payload);
     const { access_token, user: userData } = response.data;
     localStorage.setItem('prive_token', access_token);
     setToken(access_token);
