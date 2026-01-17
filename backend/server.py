@@ -1693,6 +1693,38 @@ async def get_creator(creator_id: str):
         raise HTTPException(status_code=404, detail="Creator not found")
     return CreatorProfile(**creator)
 
+@api_router.put("/creators/profile")
+async def update_creator_profile(
+    display_name: Optional[str] = Body(None),
+    bio: Optional[str] = Body(None),
+    subscription_price: Optional[float] = Body(None),
+    call_rate_per_minute: Optional[float] = Body(None),
+    message_price: Optional[float] = Body(None),
+    current_user: dict = Depends(get_current_user)
+):
+    if current_user["role"] not in [UserRole.CREATOR, "creator"]:
+        raise HTTPException(status_code=403, detail="Not a creator")
+    
+    update_data = {}
+    if display_name is not None:
+        update_data["display_name"] = display_name
+    if bio is not None:
+        update_data["bio"] = bio
+    if subscription_price is not None:
+        update_data["subscription_price"] = subscription_price
+    if call_rate_per_minute is not None:
+        update_data["call_rate_per_minute"] = call_rate_per_minute
+    if message_price is not None:
+        update_data["message_price"] = message_price
+    
+    if update_data:
+        await db.creators.update_one({"user_id": current_user["id"]}, {"$set": update_data})
+    
+    creator = await db.creators.find_one({"user_id": current_user["id"]}, {"_id": 0})
+    if not creator:
+        raise HTTPException(status_code=404, detail="Creator profile not found")
+    return CreatorProfile(**creator)
+
 @api_router.get("/discover")
 async def discover_creators(
     tier: Optional[str] = None,
