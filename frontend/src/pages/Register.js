@@ -2,19 +2,21 @@ import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'sonner';
-import { Loader2, Shield, Eye, EyeOff, User, Star } from 'lucide-react';
+import { Loader2, Shield, Eye, EyeOff, User, Star, Gift } from 'lucide-react';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 
 const Register = () => {
   const [searchParams] = useSearchParams();
   const initialRole = searchParams.get('role') === 'creator' ? 'creator' : 'user';
+  const referralCode = searchParams.get('ref') || '';
   
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [role, setRole] = useState(initialRole);
+  const [refCode, setRefCode] = useState(referralCode);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const { register } = useAuth();
@@ -40,7 +42,7 @@ const Register = () => {
 
     setLoading(true);
     try {
-      await register(email, username, password, role);
+      await register(email, username, password, role, refCode || undefined);
       toast.success('Account created! Please verify your identity.');
       navigate('/verify');
     } catch (error) {
@@ -184,6 +186,22 @@ const Register = () => {
                 placeholder="••••••••"
                 className="input-dark"
                 data-testid="register-confirm-password"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="refCode" className="text-zinc-400 text-xs uppercase tracking-wider flex items-center gap-1">
+                <Gift className="w-3 h-3" />
+                Referral Code (optional)
+              </Label>
+              <Input
+                id="refCode"
+                type="text"
+                value={refCode}
+                onChange={(e) => setRefCode(e.target.value.toUpperCase())}
+                placeholder="ABCD1234"
+                className="input-dark font-mono"
+                data-testid="register-referral"
               />
             </div>
 
