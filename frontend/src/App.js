@@ -14,6 +14,8 @@ import Settings from "./pages/Settings";
 import PaymentSuccess from "./pages/PaymentSuccess";
 import PaymentCancel from "./pages/PaymentCancel";
 import AdminPanel from "./pages/AdminPanel";
+import SuperAdminPanel from "./pages/SuperAdminPanel";
+import Referrals from "./pages/Referrals";
 import ProtectedRoute from "./components/ProtectedRoute";
 import "./App.css";
 
@@ -63,6 +65,12 @@ function App() {
             <Route path="/admin" element={
               <ProtectedRoute requiredRole="admin">
                 <AdminPanel />
+              </ProtectedRoute>
+            } />
+            <Route path="/super-admin" element={<SuperAdminPanel />} />
+            <Route path="/referrals" element={
+              <ProtectedRoute>
+                <Referrals />
               </ProtectedRoute>
             } />
             <Route path="*" element={<Navigate to="/" replace />} />
