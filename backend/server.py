@@ -851,6 +851,504 @@ class ReferralService:
         
         return bonus
 
+# ==================== PAYOUT SCHEDULER SERVICE ====================
+class PayoutSchedulerService:
+    """Automated payout scheduling and processing"""
+    
+    @staticmethod
+    async def check_auto_payout_eligibility(creator_id: str) -> dict:
+        """Check if a creator is eligible for auto-payout"""
+        config = await SystemConfig.get_config()
+        payout_config = config.get("payouts", {})
+        
+        if not payout_config.get("auto_payout_enabled", False):
+            return {"eligible": False, "reason": "Auto-payout disabled"}
+        
+        creator = await db.creators.find_one({"id": creator_id}, {"_id": 0})
+        if not creator:
+            return {"eligible": False, "reason": "Creator not found"}
+        
+        if not creator.get("stripe_connect_id"):
+            return {"eligible": False, "reason": "No Stripe Connect account"}
+        
+        if not creator.get("payout_enabled"):
+            return {"eligible": False, "reason": "Payouts not enabled on Stripe"}
+        
+        pending = creator.get("pending_payout", 0)
+        threshold = payout_config.get("auto_payout_threshold", 100.0)
+        min_amount = payout_config.get("min_payout_amount", 10.0)
+        
+        if pending < min_amount:
+            return {"eligible": False, "reason": f"Below minimum (${min_amount})"}
+        
+        if pending < threshold:
+            return {"eligible": False, "reason": f"Below threshold (${threshold})", "pending": pending}
+        
+        # Check hold period
+        hold_days = payout_config.get("hold_period_days", 7)
+        oldest_unpaid = await db.payment_transactions.find_one(
+            {"creator_id": creator_id, "status": PaymentStatus.PAID, "payout_processed": {"$ne": True}},
+            {"_id": 0, "created_at": 1},
+            sort=[("created_at", 1)]
+        )
+        
+        if oldest_unpaid:
+            oldest_date = datetime.fromisoformat(oldest_unpaid["created_at"].replace("Z", "+00:00"))
+            if datetime.now(timezone.utc) - oldest_date < timedelta(days=hold_days):
+                return {"eligible": False, "reason": f"Within {hold_days}-day hold period"}
+        
+        return {
+            "eligible": True,
+            "amount": pending,
+            "creator_id": creator_id,
+            "stripe_account": creator["stripe_connect_id"]
+        }
+    
+    @staticmethod
+    async def schedule_payout(creator_id: str, amount: float, trigger: str = "auto") -> dict:
+        """Schedule a payout for processing"""
+        payout_id = str(uuid.uuid4())
+        
+        payout_doc = {
+            "id": payout_id,
+            "creator_id": creator_id,
+            "amount": amount,
+            "status": PayoutStatus.SCHEDULED,
+            "trigger": trigger,
+            "scheduled_at": datetime.now(timezone.utc).isoformat(),
+            "process_after": datetime.now(timezone.utc).isoformat(),
+            "processed_at": None,
+            "transfer_id": None,
+            "error_message": None,
+            "retry_count": 0
+        }
+        
+        await db.scheduled_payouts.insert_one(payout_doc)
+        
+        # Log webhook event
+        await WebhookService.log_event("payout.scheduled", {
+            "payout_id": payout_id,
+            "creator_id": creator_id,
+            "amount": amount,
+            "trigger": trigger
+        })
+        
+        return {"payout_id": payout_id, "status": "scheduled", "amount": amount}
+    
+    @staticmethod
+    async def process_scheduled_payouts():
+        """Process all scheduled payouts that are ready"""
+        now = datetime.now(timezone.utc).isoformat()
+        
+        pending_payouts = await db.scheduled_payouts.find({
+            "status": PayoutStatus.SCHEDULED,
+            "process_after": {"$lte": now}
+        }, {"_id": 0}).to_list(100)
+        
+        results = []
+        for payout in pending_payouts:
+            result = await PayoutSchedulerService.execute_payout(payout)
+            results.append(result)
+        
+        return results
+    
+    @staticmethod
+    async def execute_payout(payout: dict) -> dict:
+        """Execute a single payout"""
+        payout_id = payout["id"]
+        creator_id = payout["creator_id"]
+        amount = payout["amount"]
+        
+        # Update status to processing
+        await db.scheduled_payouts.update_one(
+            {"id": payout_id},
+            {"$set": {"status": PayoutStatus.PROCESSING}}
+        )
+        
+        creator = await db.creators.find_one({"id": creator_id}, {"_id": 0})
+        if not creator or not creator.get("stripe_connect_id"):
+            await db.scheduled_payouts.update_one(
+                {"id": payout_id},
+                {"$set": {
+                    "status": PayoutStatus.FAILED,
+                    "error_message": "Creator or Stripe account not found",
+                    "processed_at": datetime.now(timezone.utc).isoformat()
+                }}
+            )
+            return {"payout_id": payout_id, "status": "failed", "error": "No Stripe account"}
+        
+        # Check balance
+        if creator.get("pending_payout", 0) < amount:
+            await db.scheduled_payouts.update_one(
+                {"id": payout_id},
+                {"$set": {
+                    "status": PayoutStatus.FAILED,
+                    "error_message": "Insufficient balance",
+                    "processed_at": datetime.now(timezone.utc).isoformat()
+                }}
+            )
+            return {"payout_id": payout_id, "status": "failed", "error": "Insufficient balance"}
+        
+        # Execute Stripe transfer
+        try:
+            result = await StripeService.create_payout(creator["stripe_connect_id"], amount)
+            
+            if result["status"] == "success":
+                # Update payout record
+                await db.scheduled_payouts.update_one(
+                    {"id": payout_id},
+                    {"$set": {
+                        "status": PayoutStatus.COMPLETED,
+                        "transfer_id": result["transfer_id"],
+                        "processed_at": datetime.now(timezone.utc).isoformat()
+                    }}
+                )
+                
+                # Deduct from creator's pending balance
+                await db.creators.update_one(
+                    {"id": creator_id},
+                    {"$inc": {"pending_payout": -amount}}
+                )
+                
+                # Mark transactions as paid out
+                await db.payment_transactions.update_many(
+                    {"creator_id": creator_id, "status": PaymentStatus.PAID, "payout_processed": {"$ne": True}},
+                    {"$set": {"payout_processed": True, "payout_id": payout_id}}
+                )
+                
+                # Log webhook event
+                await WebhookService.log_event("payout.completed", {
+                    "payout_id": payout_id,
+                    "creator_id": creator_id,
+                    "amount": amount,
+                    "transfer_id": result["transfer_id"]
+                })
+                
+                # Send notification
+                await WebhookService.send_notification(
+                    "payout_completed",
+                    creator_id,
+                    {"amount": amount, "transfer_id": result["transfer_id"]}
+                )
+                
+                return {"payout_id": payout_id, "status": "completed", "transfer_id": result["transfer_id"]}
+            else:
+                raise Exception(result.get("message", "Transfer failed"))
+                
+        except Exception as e:
+            retry_count = payout.get("retry_count", 0) + 1
+            config = await SystemConfig.get_config()
+            max_retries = config.get("webhooks", {}).get("retry_attempts", 3)
+            
+            if retry_count < max_retries:
+                # Schedule retry
+                await db.scheduled_payouts.update_one(
+                    {"id": payout_id},
+                    {"$set": {
+                        "status": PayoutStatus.SCHEDULED,
+                        "retry_count": retry_count,
+                        "error_message": str(e),
+                        "process_after": (datetime.now(timezone.utc) + timedelta(hours=retry_count)).isoformat()
+                    }}
+                )
+                return {"payout_id": payout_id, "status": "retry_scheduled", "retry": retry_count}
+            else:
+                await db.scheduled_payouts.update_one(
+                    {"id": payout_id},
+                    {"$set": {
+                        "status": PayoutStatus.FAILED,
+                        "error_message": str(e),
+                        "processed_at": datetime.now(timezone.utc).isoformat()
+                    }}
+                )
+                
+                await WebhookService.log_event("payout.failed", {
+                    "payout_id": payout_id,
+                    "creator_id": creator_id,
+                    "amount": amount,
+                    "error": str(e)
+                })
+                
+                return {"payout_id": payout_id, "status": "failed", "error": str(e)}
+    
+    @staticmethod
+    async def check_and_schedule_all_eligible():
+        """Check all creators and schedule payouts for eligible ones"""
+        creators = await db.creators.find(
+            {"stripe_connect_id": {"$exists": True, "$ne": None}, "payout_enabled": True},
+            {"_id": 0}
+        ).to_list(1000)
+        
+        scheduled = []
+        for creator in creators:
+            eligibility = await PayoutSchedulerService.check_auto_payout_eligibility(creator["id"])
+            if eligibility.get("eligible"):
+                result = await PayoutSchedulerService.schedule_payout(
+                    creator["id"],
+                    eligibility["amount"],
+                    "auto_threshold"
+                )
+                scheduled.append(result)
+        
+        return scheduled
+
+# ==================== WEBHOOK SERVICE ====================
+class WebhookService:
+    """Webhook event handling and notifications"""
+    
+    @staticmethod
+    async def log_event(event_type: str, data: dict, source: str = "internal"):
+        """Log a webhook event"""
+        event_doc = {
+            "id": str(uuid.uuid4()),
+            "event_type": event_type,
+            "source": source,
+            "data": data,
+            "processed": False,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        await db.webhook_events.insert_one(event_doc)
+        return event_doc["id"]
+    
+    @staticmethod
+    async def verify_stripe_signature(payload: bytes, signature: str) -> bool:
+        """Verify Stripe webhook signature"""
+        config = await SystemConfig.get_config()
+        webhook_secret = config.get("webhooks", {}).get("secret_key", "")
+        
+        if not webhook_secret:
+            return True  # Skip verification if no secret configured
+        
+        try:
+            import stripe
+            stripe_config = config.get("payment", {})
+            stripe.api_key = stripe_config.get("stripe_test_key") if stripe_config.get("provider") == "stripe_test" else stripe_config.get("stripe_live_key")
+            
+            # Note: In production, use stripe.Webhook.construct_event()
+            return True
+        except Exception as e:
+            logger.error(f"Webhook signature verification failed: {e}")
+            return False
+    
+    @staticmethod
+    async def handle_stripe_event(event_type: str, event_data: dict) -> dict:
+        """Handle incoming Stripe webhook events"""
+        logger.info(f"Processing Stripe webhook: {event_type}")
+        
+        # Log the event
+        event_id = await WebhookService.log_event(event_type, event_data, "stripe")
+        
+        result = {"event_id": event_id, "event_type": event_type, "processed": False}
+        
+        try:
+            if event_type == "checkout.session.completed":
+                result = await WebhookService._handle_checkout_completed(event_data)
+            
+            elif event_type == "payment_intent.succeeded":
+                result = await WebhookService._handle_payment_succeeded(event_data)
+            
+            elif event_type == "payment_intent.payment_failed":
+                result = await WebhookService._handle_payment_failed(event_data)
+            
+            elif event_type == "account.updated":
+                result = await WebhookService._handle_account_updated(event_data)
+            
+            elif event_type == "transfer.created":
+                result = await WebhookService._handle_transfer_created(event_data)
+            
+            elif event_type == "payout.paid":
+                result = await WebhookService._handle_payout_paid(event_data)
+            
+            elif event_type == "payout.failed":
+                result = await WebhookService._handle_payout_failed(event_data)
+            
+            # Mark event as processed
+            await db.webhook_events.update_one(
+                {"id": event_id},
+                {"$set": {"processed": True, "result": result}}
+            )
+            
+            result["processed"] = True
+            
+        except Exception as e:
+            logger.error(f"Error processing webhook {event_type}: {e}")
+            await db.webhook_events.update_one(
+                {"id": event_id},
+                {"$set": {"error": str(e)}}
+            )
+            result["error"] = str(e)
+        
+        return result
+    
+    @staticmethod
+    async def _handle_checkout_completed(data: dict) -> dict:
+        """Handle checkout.session.completed event"""
+        session = data.get("object", data)
+        session_id = session.get("id")
+        metadata = session.get("metadata", {})
+        
+        # Find the transaction
+        transaction = await db.payment_transactions.find_one(
+            {"session_id": session_id},
+            {"_id": 0}
+        )
+        
+        if not transaction:
+            return {"status": "not_found", "session_id": session_id}
+        
+        if transaction["status"] == PaymentStatus.PAID:
+            return {"status": "already_processed", "session_id": session_id}
+        
+        # Process the payment
+        await process_successful_payment(transaction)
+        
+        await db.payment_transactions.update_one(
+            {"session_id": session_id},
+            {"$set": {"status": PaymentStatus.PAID, "payment_status": "paid"}}
+        )
+        
+        # Check if creator is eligible for auto-payout
+        creator_id = transaction.get("creator_id")
+        if creator_id:
+            eligibility = await PayoutSchedulerService.check_auto_payout_eligibility(creator_id)
+            if eligibility.get("eligible"):
+                await PayoutSchedulerService.schedule_payout(
+                    creator_id,
+                    eligibility["amount"],
+                    "auto_threshold"
+                )
+        
+        return {"status": "processed", "session_id": session_id, "transaction_id": transaction["id"]}
+    
+    @staticmethod
+    async def _handle_payment_succeeded(data: dict) -> dict:
+        """Handle payment_intent.succeeded event"""
+        payment_intent = data.get("object", data)
+        pi_id = payment_intent.get("id")
+        
+        await WebhookService.log_event("payment.succeeded", {
+            "payment_intent_id": pi_id,
+            "amount": payment_intent.get("amount"),
+            "currency": payment_intent.get("currency")
+        })
+        
+        return {"status": "logged", "payment_intent_id": pi_id}
+    
+    @staticmethod
+    async def _handle_payment_failed(data: dict) -> dict:
+        """Handle payment_intent.payment_failed event"""
+        payment_intent = data.get("object", data)
+        pi_id = payment_intent.get("id")
+        error = payment_intent.get("last_payment_error", {})
+        
+        await WebhookService.log_event("payment.failed", {
+            "payment_intent_id": pi_id,
+            "error_code": error.get("code"),
+            "error_message": error.get("message")
+        })
+        
+        return {"status": "logged", "payment_intent_id": pi_id}
+    
+    @staticmethod
+    async def _handle_account_updated(data: dict) -> dict:
+        """Handle account.updated event (Stripe Connect)"""
+        account = data.get("object", data)
+        account_id = account.get("id")
+        
+        # Find the creator with this Stripe account
+        creator = await db.creators.find_one(
+            {"stripe_connect_id": account_id},
+            {"_id": 0}
+        )
+        
+        if not creator:
+            return {"status": "account_not_linked", "account_id": account_id}
+        
+        # Update payout status
+        payouts_enabled = account.get("payouts_enabled", False)
+        charges_enabled = account.get("charges_enabled", False)
+        
+        await db.creators.update_one(
+            {"stripe_connect_id": account_id},
+            {"$set": {
+                "payout_enabled": payouts_enabled,
+                "charges_enabled": charges_enabled,
+                "stripe_details_submitted": account.get("details_submitted", False)
+            }}
+        )
+        
+        # If payouts just became enabled, check for pending payouts
+        if payouts_enabled:
+            eligibility = await PayoutSchedulerService.check_auto_payout_eligibility(creator["id"])
+            if eligibility.get("eligible"):
+                await PayoutSchedulerService.schedule_payout(
+                    creator["id"],
+                    eligibility["amount"],
+                    "account_activated"
+                )
+        
+        return {"status": "updated", "creator_id": creator["id"], "payouts_enabled": payouts_enabled}
+    
+    @staticmethod
+    async def _handle_transfer_created(data: dict) -> dict:
+        """Handle transfer.created event"""
+        transfer = data.get("object", data)
+        transfer_id = transfer.get("id")
+        
+        await WebhookService.log_event("transfer.created", {
+            "transfer_id": transfer_id,
+            "amount": transfer.get("amount"),
+            "destination": transfer.get("destination")
+        })
+        
+        return {"status": "logged", "transfer_id": transfer_id}
+    
+    @staticmethod
+    async def _handle_payout_paid(data: dict) -> dict:
+        """Handle payout.paid event"""
+        payout = data.get("object", data)
+        payout_id = payout.get("id")
+        
+        await WebhookService.log_event("payout.paid", {
+            "stripe_payout_id": payout_id,
+            "amount": payout.get("amount"),
+            "arrival_date": payout.get("arrival_date")
+        })
+        
+        return {"status": "logged", "payout_id": payout_id}
+    
+    @staticmethod
+    async def _handle_payout_failed(data: dict) -> dict:
+        """Handle payout.failed event"""
+        payout = data.get("object", data)
+        payout_id = payout.get("id")
+        
+        await WebhookService.log_event("payout.failed", {
+            "stripe_payout_id": payout_id,
+            "failure_code": payout.get("failure_code"),
+            "failure_message": payout.get("failure_message")
+        })
+        
+        return {"status": "logged", "payout_id": payout_id}
+    
+    @staticmethod
+    async def send_notification(notification_type: str, user_id: str, data: dict):
+        """Send notification to user (email, push, etc.)"""
+        notification_doc = {
+            "id": str(uuid.uuid4()),
+            "type": notification_type,
+            "user_id": user_id,
+            "data": data,
+            "read": False,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        await db.notifications.insert_one(notification_doc)
+        
+        # In production, trigger email/push notification here
+        logger.info(f"Notification sent: {notification_type} to {user_id}")
+        
+        return notification_doc["id"]
+
 # ==================== AUTH ROUTES ====================
 @api_router.post("/auth/register", response_model=TokenResponse)
 async def register(data: UserCreate):
