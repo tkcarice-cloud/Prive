@@ -1,7 +1,7 @@
-# PRIVÉ - Product Requirements Document
+# PRIVÉ - Product Requirements Document v2.0
 
 ## Overview
-PRIVÉ is a luxury, privacy-first creator monetization platform positioned above OnlyFans. Open access with premium enforcement via verification, encryption, moderation, and design.
+PRIVÉ is a luxury, privacy-first creator monetization platform positioned above OnlyFans. Features production-ready architecture with swappable service integrations (storage, payments, KYC, encryption) via admin-controlled configuration panel.
 
 ## User Personas
 
@@ -9,116 +9,128 @@ PRIVÉ is a luxury, privacy-first creator monetization platform positioned above
 - Content creators seeking higher revenue share (75%)
 - Require identity verification for trust
 - Tiers: Standard → Verified → Elite
-- Features: Profile, content uploads, paid DMs, paid calls, earnings dashboard
+- Features: Profile, content uploads, paid DMs, Stripe Connect payouts, earnings dashboard
 
-### Members/Patrons
+### Members/Patrons  
 - High-net-worth individuals seeking exclusive content
 - Require identity verification for access
-- Features: Subscriptions, messaging, content feed, transaction history
+- Features: Subscriptions, messaging, content feed, referral program
 
 ### Admins
 - Platform operators managing verification queue
 - Moderation, analytics, dispute handling
-- Autonomous operations with minimal intervention
 
-## Core Requirements (Static)
-
-### Identity & Trust
-- [x] Government ID + selfie verification flow
-- [x] Verification required before content access/messaging/payments
-- [x] Verification status badges
-
-### Communication
-- [x] E2EE messaging indicators (simulated)
-- [x] Encrypted status displayed on all messages
-- [x] Creator-controlled availability
-
-### Business Model
-- [x] 75% creator / 25% platform revenue split
-- [x] Subscriptions (monthly recurring)
-- [x] Pay-per-view (PPV) content
-- [x] Tips
-- [x] Paid DMs
-- [x] Stripe payment integration
-
-### Admin Operations
-- [x] Verification approval/rejection queue
-- [x] Platform analytics dashboard
-- [x] Creator tier management
+### Super Admin
+- Full system control via configuration panel
+- API key management, user management, payout triggers
+- 2FA mandatory with backup codes
 
 ## What's Been Implemented (January 17, 2026)
 
-### Backend (FastAPI)
-- JWT authentication with role-based access (user/creator/admin)
-- User registration and login
-- Identity verification submission and admin approval
-- Creator profiles with tier system
-- Content management (create, list, unlock)
-- Subscription system
-- E2EE messaging (simulated encryption indicators)
-- Stripe checkout integration for payments
-- Earnings tracking and analytics
-- Admin verification queue and analytics
+### Backend Services (Production-Ready Architecture)
 
-### Frontend (React)
-- Landing page with dark luxury aesthetic
-- Authentication pages (login/register)
-- Identity verification flow (ID upload + selfie capture)
-- User dashboard with subscription feed
-- Creator dashboard with earnings (privacy toggle)
-- Discover/explore creators with tier filtering
-- Creator profile pages with subscribe/tip/message
-- E2EE messaging interface
-- Payment success/cancel pages
-- Admin panel for verification queue
-- Settings page
+#### SystemConfig Service
+- [x] Dynamic configuration stored in MongoDB
+- [x] Real-time switching between providers without redeployment
+- [x] Audit logging for config changes
 
-### Design System
-- Dark obsidian (#020202) background
-- Metallic gold (#D4AF37) accents
-- Playfair Display (headings), Manrope (body), JetBrains Mono (mono)
-- Glassmorphism cards with subtle borders
-- Sharp corners (no rounded-xl)
+#### StorageService
+- [x] Local storage (default/demo)
+- [x] AWS S3 ready (needs keys)
+- [x] Cloudinary ready (needs keys)
 
-## Prioritized Backlog
+#### KYCService
+- [x] Mock provider (default) with full UI flow
+- [x] Jumio integration ready
+- [x] Onfido integration ready  
+- [x] Veriff integration ready
 
-### P0 (Critical - Not Started)
-- Real E2EE implementation (Signal Protocol)
-- Real-time WebRTC voice/video calls
-- Actual ID verification integration (Jumio/Onfido)
-- DMCA takedown workflow
-- Content moderation AI
+#### StripeService
+- [x] Test mode (default)
+- [x] Live mode ready
+- [x] Stripe Connect for creator payouts
+- [x] Express account onboarding
+- [x] Payout transfers to connected accounts
 
-### P1 (High Priority)
-- Media upload and CDN storage
-- Watermarking system
-- Payout management (Stripe Connect)
-- Push notifications
-- Content scheduling
+#### E2EEService
+- [x] X25519 key pair generation
+- [x] Prekey bundle system (libsignal-compatible)
+- [x] AES-GCM-256 encryption (Web Crypto fallback)
+- [x] Session management
 
-### P2 (Medium Priority)
-- Private requests marketplace
-- Concierge services
-- Referral program
-- Creator analytics dashboard
-- Mobile-responsive improvements
+#### ReferralService
+- [x] Tiered bonus system (Bronze/Silver/Gold/Platinum)
+- [x] 5-12.5% bonus on referred earnings
+- [x] 6-month bonus duration (configurable)
+- [x] Both creator and user referrals
 
-### P3 (Nice to Have)
-- 2FA authentication
-- Dark/light mode toggle
-- Custom creator URLs
-- Promotional tools
+### Super Admin Panel
+- [x] `/api/super-admin/init` - One-time account creation with 2FA
+- [x] Configuration panel for all service providers
+- [x] User management (list, update, delete)
+- [x] Creator management with tier control
+- [x] Manual payout triggers
+- [x] Verification status management
+- [x] Platform analytics dashboard
+- [x] Audit log viewer
+
+### Two-Factor Authentication
+- [x] TOTP setup with QR code
+- [x] Backup codes generation
+- [x] 2FA verification on login
+- [x] Enable/disable 2FA
+
+### Frontend Pages
+- [x] Landing page (dark luxury theme)
+- [x] Login with 2FA support
+- [x] Register with referral code
+- [x] Identity Verification flow
+- [x] Dashboard
+- [x] Creator Dashboard with earnings
+- [x] Discover creators
+- [x] Creator Profile with subscribe/tip
+- [x] E2EE Messages
+- [x] Settings with 2FA & Stripe Connect
+- [x] Referrals page with tier progress
+- [x] Super Admin Panel
+- [x] Payment success/cancel
+
+## Service Configuration (Swappable via Super Admin)
+
+| Service | Default | Production-Ready Options |
+|---------|---------|-------------------------|
+| Storage | Local | AWS S3, Cloudinary |
+| Payments | Stripe Test | Stripe Live |
+| KYC | Mock | Jumio, Onfido, Veriff |
+| Encryption | Web Crypto | libsignal (architecture ready) |
+
+## SUPER_ADMIN Credentials
+- Email: `superadmin@prive.internal`
+- Password: Auto-generated on init
+- 2FA: Mandatory (TOTP secret provided)
+- Backup codes: 10 codes provided
+
+## Referral Tier System
+| Tier | Min Referrals | Bonus % |
+|------|---------------|---------|
+| Bronze | 1 | 5% |
+| Silver | 5 | 7.5% |
+| Gold | 10 | 10% |
+| Platinum | 25 | 12.5% |
 
 ## Technical Stack
 - **Frontend**: React 19 + Tailwind CSS + Shadcn UI
 - **Backend**: FastAPI (Python)
 - **Database**: MongoDB
-- **Payments**: Stripe (test mode)
-- **Auth**: JWT with bcrypt password hashing
+- **Payments**: Stripe + Stripe Connect
+- **Auth**: JWT + bcrypt + TOTP (pyotp)
+- **Encryption**: cryptography (X25519, AES-GCM)
 
 ## Next Action Items
-1. Implement real media upload to cloud storage (S3/Cloudinary)
-2. Add content watermarking for creator protection
-3. Implement Stripe Connect for creator payouts
-4. Add real-time notifications (WebSocket)
-5. Build content moderation queue
+1. Deploy and test with real Stripe Connect account
+2. Configure real KYC provider (Jumio/Onfido/Veriff)
+3. Add AWS S3 bucket for media storage
+4. Implement WebSocket for real-time messaging
+5. Add libsignal for full Signal Protocol E2EE
+6. Build mobile-responsive improvements
+7. Add DMCA takedown workflow
