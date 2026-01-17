@@ -2548,36 +2548,316 @@ async def process_successful_payment(transaction: dict):
 
 @api_router.post("/webhook/stripe")
 async def stripe_webhook(request: Request):
-    from emergentintegrations.payments.stripe.checkout import StripeCheckout
-    
-    config = await SystemConfig.get_config()
-    api_key = config["payment"]["stripe_test_key"]
-    
+    """Enhanced Stripe webhook handler with auto-payout scheduling"""
     body = await request.body()
     signature = request.headers.get("Stripe-Signature", "")
     
-    webhook_url = f"{str(request.base_url)}api/webhook/stripe"
-    stripe_checkout = StripeCheckout(api_key=api_key, webhook_url=webhook_url)
+    # Verify signature
+    if not await WebhookService.verify_stripe_signature(body, signature):
+        raise HTTPException(status_code=400, detail="Invalid signature")
     
     try:
-        webhook_response = await stripe_checkout.handle_webhook(body, signature)
+        payload = json.loads(body.decode())
+        event_type = payload.get("type", "")
+        event_data = payload.get("data", {})
         
-        if webhook_response.payment_status == "paid":
-            transaction = await db.payment_transactions.find_one(
-                {"session_id": webhook_response.session_id},
-                {"_id": 0}
-            )
-            if transaction and transaction["status"] != PaymentStatus.PAID:
-                await process_successful_payment(transaction)
-                await db.payment_transactions.update_one(
+        # Handle the event
+        result = await WebhookService.handle_stripe_event(event_type, event_data)
+        
+        return {"status": "ok", "result": result}
+    except json.JSONDecodeError:
+        # Fall back to legacy handling
+        from emergentintegrations.payments.stripe.checkout import StripeCheckout
+        
+        config = await SystemConfig.get_config()
+        api_key = config["payment"]["stripe_test_key"]
+        
+        webhook_url = f"{str(request.base_url)}api/webhook/stripe"
+        stripe_checkout = StripeCheckout(api_key=api_key, webhook_url=webhook_url)
+        
+        try:
+            webhook_response = await stripe_checkout.handle_webhook(body, signature)
+            
+            if webhook_response.payment_status == "paid":
+                transaction = await db.payment_transactions.find_one(
                     {"session_id": webhook_response.session_id},
-                    {"$set": {"status": PaymentStatus.PAID, "payment_status": "paid"}}
+                    {"_id": 0}
                 )
+                if transaction and transaction["status"] != PaymentStatus.PAID:
+                    await process_successful_payment(transaction)
+                    await db.payment_transactions.update_one(
+                        {"session_id": webhook_response.session_id},
+                        {"$set": {"status": PaymentStatus.PAID, "payment_status": "paid"}}
+                    )
+                    
+                    # Check auto-payout eligibility
+                    if transaction.get("creator_id"):
+                        eligibility = await PayoutSchedulerService.check_auto_payout_eligibility(transaction["creator_id"])
+                        if eligibility.get("eligible"):
+                            await PayoutSchedulerService.schedule_payout(
+                                transaction["creator_id"],
+                                eligibility["amount"],
+                                "auto_threshold"
+                            )
+            
+            return {"status": "ok"}
+        except Exception as e:
+            logger.error(f"Webhook error: {e}")
+            return {"status": "error", "message": str(e)}
+
+@api_router.post("/webhook/stripe/connect")
+async def stripe_connect_webhook(request: Request):
+    """Webhook handler for Stripe Connect events"""
+    body = await request.body()
+    signature = request.headers.get("Stripe-Signature", "")
+    
+    try:
+        payload = json.loads(body.decode())
+        event_type = payload.get("type", "")
+        event_data = payload.get("data", {})
         
-        return {"status": "ok"}
+        result = await WebhookService.handle_stripe_event(event_type, event_data)
+        
+        return {"status": "ok", "result": result}
     except Exception as e:
-        logger.error(f"Webhook error: {e}")
+        logger.error(f"Connect webhook error: {e}")
         return {"status": "error", "message": str(e)}
+
+# ==================== PAYOUT MANAGEMENT ROUTES ====================
+@api_router.get("/payouts/scheduled")
+async def get_scheduled_payouts(current_user: dict = Depends(get_current_user)):
+    """Get scheduled payouts for the current creator"""
+    if current_user["role"] not in [UserRole.CREATOR, "creator"]:
+        raise HTTPException(status_code=403, detail="Not a creator")
+    
+    creator = await db.creators.find_one({"user_id": current_user["id"]}, {"_id": 0})
+    if not creator:
+        raise HTTPException(status_code=404, detail="Creator not found")
+    
+    payouts = await db.scheduled_payouts.find(
+        {"creator_id": creator["id"]},
+        {"_id": 0}
+    ).sort("scheduled_at", -1).limit(50).to_list(50)
+    
+    return payouts
+
+@api_router.get("/payouts/history")
+async def get_payout_history(
+    limit: int = 20,
+    skip: int = 0,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get payout history for the current creator"""
+    if current_user["role"] not in [UserRole.CREATOR, "creator"]:
+        raise HTTPException(status_code=403, detail="Not a creator")
+    
+    creator = await db.creators.find_one({"user_id": current_user["id"]}, {"_id": 0})
+    if not creator:
+        raise HTTPException(status_code=404, detail="Creator not found")
+    
+    payouts = await db.scheduled_payouts.find(
+        {"creator_id": creator["id"], "status": {"$in": [PayoutStatus.COMPLETED, PayoutStatus.FAILED]}},
+        {"_id": 0}
+    ).sort("processed_at", -1).skip(skip).limit(limit).to_list(limit)
+    
+    total = await db.scheduled_payouts.count_documents({
+        "creator_id": creator["id"],
+        "status": {"$in": [PayoutStatus.COMPLETED, PayoutStatus.FAILED]}
+    })
+    
+    return {"payouts": payouts, "total": total}
+
+@api_router.post("/payouts/request-instant")
+async def request_instant_payout(
+    amount: float = Body(..., embed=True),
+    current_user: dict = Depends(get_current_user)
+):
+    """Request an instant payout (with fee)"""
+    config = await SystemConfig.get_config()
+    payout_config = config.get("payouts", {})
+    
+    if not payout_config.get("instant_payout_enabled"):
+        raise HTTPException(status_code=400, detail="Instant payouts not enabled")
+    
+    if current_user["role"] not in [UserRole.CREATOR, "creator"]:
+        raise HTTPException(status_code=403, detail="Not a creator")
+    
+    creator = await db.creators.find_one({"user_id": current_user["id"]}, {"_id": 0})
+    if not creator:
+        raise HTTPException(status_code=404, detail="Creator not found")
+    
+    if not creator.get("stripe_connect_id") or not creator.get("payout_enabled"):
+        raise HTTPException(status_code=400, detail="Payouts not enabled")
+    
+    pending = creator.get("pending_payout", 0)
+    min_amount = payout_config.get("min_payout_amount", 10.0)
+    fee_percent = payout_config.get("instant_payout_fee_percent", 1.5)
+    
+    if amount < min_amount:
+        raise HTTPException(status_code=400, detail=f"Minimum payout is ${min_amount}")
+    
+    if amount > pending:
+        raise HTTPException(status_code=400, detail="Insufficient balance")
+    
+    # Calculate fee
+    fee = amount * (fee_percent / 100)
+    net_amount = amount - fee
+    
+    # Schedule for immediate processing
+    result = await PayoutSchedulerService.schedule_payout(
+        creator["id"],
+        net_amount,
+        "instant"
+    )
+    
+    # Process immediately
+    payout = await db.scheduled_payouts.find_one({"id": result["payout_id"]}, {"_id": 0})
+    if payout:
+        await PayoutSchedulerService.execute_payout(payout)
+    
+    return {
+        "status": "processing",
+        "gross_amount": amount,
+        "fee": fee,
+        "fee_percent": fee_percent,
+        "net_amount": net_amount,
+        "payout_id": result["payout_id"]
+    }
+
+@api_router.get("/payouts/eligibility")
+async def check_payout_eligibility(current_user: dict = Depends(get_current_user)):
+    """Check current payout eligibility status"""
+    if current_user["role"] not in [UserRole.CREATOR, "creator"]:
+        raise HTTPException(status_code=403, detail="Not a creator")
+    
+    creator = await db.creators.find_one({"user_id": current_user["id"]}, {"_id": 0})
+    if not creator:
+        raise HTTPException(status_code=404, detail="Creator not found")
+    
+    eligibility = await PayoutSchedulerService.check_auto_payout_eligibility(creator["id"])
+    
+    config = await SystemConfig.get_config()
+    payout_config = config.get("payouts", {})
+    
+    return {
+        **eligibility,
+        "pending_balance": creator.get("pending_payout", 0),
+        "auto_payout_threshold": payout_config.get("auto_payout_threshold", 100.0),
+        "min_payout_amount": payout_config.get("min_payout_amount", 10.0),
+        "hold_period_days": payout_config.get("hold_period_days", 7),
+        "instant_payout_available": payout_config.get("instant_payout_enabled", False),
+        "instant_payout_fee": payout_config.get("instant_payout_fee_percent", 1.5)
+    }
+
+# ==================== WEBHOOK EVENT ROUTES ====================
+@api_router.get("/webhooks/events")
+async def get_webhook_events(
+    limit: int = 50,
+    event_type: Optional[str] = None,
+    current_user: dict = Depends(require_admin)
+):
+    """Get webhook events (admin only)"""
+    query = {}
+    if event_type:
+        query["event_type"] = event_type
+    
+    events = await db.webhook_events.find(query, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+    return events
+
+@api_router.get("/notifications")
+async def get_notifications(
+    limit: int = 20,
+    unread_only: bool = False,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get user notifications"""
+    query = {"user_id": current_user["id"]}
+    if unread_only:
+        query["read"] = False
+    
+    notifications = await db.notifications.find(query, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+    unread_count = await db.notifications.count_documents({"user_id": current_user["id"], "read": False})
+    
+    return {"notifications": notifications, "unread_count": unread_count}
+
+@api_router.post("/notifications/{notification_id}/read")
+async def mark_notification_read(notification_id: str, current_user: dict = Depends(get_current_user)):
+    """Mark a notification as read"""
+    result = await db.notifications.update_one(
+        {"id": notification_id, "user_id": current_user["id"]},
+        {"$set": {"read": True}}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    
+    return {"status": "ok"}
+
+# ==================== SUPER ADMIN PAYOUT MANAGEMENT ====================
+@api_router.post("/super-admin/payouts/process-all")
+async def process_all_scheduled_payouts(current_user: dict = Depends(require_super_admin)):
+    """Manually trigger processing of all scheduled payouts"""
+    results = await PayoutSchedulerService.process_scheduled_payouts()
+    
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "action": "manual_payout_processing",
+        "user_id": current_user["id"],
+        "results_count": len(results),
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    })
+    
+    return {"processed": len(results), "results": results}
+
+@api_router.post("/super-admin/payouts/check-eligible")
+async def check_all_eligible_payouts(current_user: dict = Depends(require_super_admin)):
+    """Check and schedule payouts for all eligible creators"""
+    scheduled = await PayoutSchedulerService.check_and_schedule_all_eligible()
+    
+    return {"scheduled": len(scheduled), "payouts": scheduled}
+
+@api_router.get("/super-admin/payouts/pending")
+async def get_all_pending_payouts(current_user: dict = Depends(require_super_admin)):
+    """Get all pending/scheduled payouts"""
+    payouts = await db.scheduled_payouts.find(
+        {"status": {"$in": [PayoutStatus.PENDING, PayoutStatus.SCHEDULED, PayoutStatus.PROCESSING]}},
+        {"_id": 0}
+    ).sort("scheduled_at", -1).to_list(100)
+    
+    # Attach creator info
+    for payout in payouts:
+        creator = await db.creators.find_one({"id": payout["creator_id"]}, {"_id": 0, "display_name": 1, "username": 1})
+        payout["creator"] = creator
+    
+    return payouts
+
+@api_router.put("/super-admin/config/payouts")
+async def update_payout_config(
+    config_updates: dict = Body(...),
+    current_user: dict = Depends(require_super_admin)
+):
+    """Update payout configuration"""
+    allowed_keys = [
+        "auto_payout_enabled", "auto_payout_threshold", "auto_payout_frequency",
+        "min_payout_amount", "payout_day_of_week", "hold_period_days",
+        "instant_payout_enabled", "instant_payout_fee_percent"
+    ]
+    
+    updates = {f"payouts.{k}": v for k, v in config_updates.items() if k in allowed_keys}
+    
+    if updates:
+        await SystemConfig.update_config(updates)
+        SystemConfig.invalidate_cache()
+    
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "action": "payout_config_update",
+        "user_id": current_user["id"],
+        "changes": list(updates.keys()),
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    })
+    
+    return {"message": "Payout configuration updated", "changes": list(config_updates.keys())}
 
 # ==================== EARNINGS ROUTES ====================
 @api_router.get("/earnings")
