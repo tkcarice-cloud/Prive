@@ -169,6 +169,22 @@ class SystemConfig:
                             "platinum": {"min_referrals": 25, "bonus_percent": 12.5}
                         }
                     },
+                    "payouts": {
+                        "auto_payout_enabled": True,
+                        "auto_payout_threshold": 100.0,
+                        "auto_payout_frequency": "weekly",
+                        "min_payout_amount": 10.0,
+                        "payout_day_of_week": 1,
+                        "hold_period_days": 7,
+                        "instant_payout_enabled": False,
+                        "instant_payout_fee_percent": 1.5
+                    },
+                    "webhooks": {
+                        "enabled": True,
+                        "secret_key": secrets.token_hex(32),
+                        "retry_attempts": 3,
+                        "notification_emails": []
+                    },
                     "updated_at": datetime.now(timezone.utc).isoformat()
                 }
                 await db.system_config.insert_one(cls._config)
