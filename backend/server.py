@@ -81,6 +81,23 @@ class PaymentStatus(str, Enum):
     EXPIRED = "expired"
     REFUNDED = "refunded"
 
+class PayoutStatus(str, Enum):
+    PENDING = "pending"
+    SCHEDULED = "scheduled"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+class WebhookEventType(str, Enum):
+    CHECKOUT_COMPLETED = "checkout.session.completed"
+    PAYMENT_SUCCEEDED = "payment_intent.succeeded"
+    PAYMENT_FAILED = "payment_intent.payment_failed"
+    PAYOUT_CREATED = "payout.created"
+    PAYOUT_PAID = "payout.paid"
+    PAYOUT_FAILED = "payout.failed"
+    ACCOUNT_UPDATED = "account.updated"
+    TRANSFER_CREATED = "transfer.created"
+
 class KYCProvider(str, Enum):
     MOCK = "mock"
     JUMIO = "jumio"
