@@ -9,7 +9,8 @@ import {
   LogOut,
   User,
   LayoutDashboard,
-  Lock
+  Lock,
+  Gift
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -163,6 +164,12 @@ const Navigation = () => {
                         </Link>
                       </DropdownMenuItem>
                     )}
+                    <DropdownMenuItem asChild>
+                      <Link to="/referrals" className="flex items-center gap-2" data-testid="menu-referrals">
+                        <Gift className="w-4 h-4" />
+                        <span>Referral Program</span>
+                      </Link>
+                    </DropdownMenuItem>
                     <DropdownMenuSeparator className="bg-white/5" />
                     <DropdownMenuItem 
                       onClick={handleLogout}
