@@ -428,6 +428,178 @@ class PriveAPITester:
         
         return all_success and success1 and success2
 
+    def test_super_admin_system(self):
+        """Test Super Admin functionality"""
+        print("\n" + "="*50)
+        print("TESTING SUPER ADMIN SYSTEM")
+        print("="*50)
+        
+        all_success = True
+        
+        # Test Super Admin initialization
+        success1, response = self.run_test(
+            "Initialize Super Admin",
+            "POST",
+            "super-admin/init",
+            200
+        )
+        
+        if success1 and 'credentials' in response:
+            print(f"   ✅ Super Admin created with email: {response['credentials']['email']}")
+            
+            # Try to login as Super Admin (will need 2FA)
+            login_data = {
+                'email': response['credentials']['email'],
+                'password': response['credentials']['password']
+            }
+            
+            success2, login_response = self.run_test(
+                "Super Admin Login (partial - needs 2FA)",
+                "POST",
+                "auth/login",
+                200,
+                data=login_data
+            )
+            
+            if success2 and login_response.get('requires_2fa'):
+                print("   ✅ Super Admin login requires 2FA as expected")
+                # Store partial token for potential future use
+                self.tokens['super_admin_partial'] = login_response['access_token']
+            
+        elif not success1:
+            # Super Admin might already exist, try to test with existing credentials
+            print("   ℹ️  Super Admin already exists, testing with test credentials")
+            
+            # Try with test credentials from review request
+            test_login_data = {
+                'email': 'superadmin@prive.internal',
+                'password': 'test_password'  # This will likely fail without proper credentials
+            }
+            
+            success2, _ = self.run_test(
+                "Super Admin Login (test)",
+                "POST",
+                "auth/login",
+                401,  # Expect failure without proper credentials
+                data=test_login_data
+            )
+            
+            if success2:  # 401 is expected
+                print("   ✅ Super Admin login properly protected")
+        
+        return all_success and success1
+
+    def test_referral_system(self):
+        """Test referral system functionality"""
+        print("\n" + "="*50)
+        print("TESTING REFERRAL SYSTEM")
+        print("="*50)
+        
+        if 'user' not in self.tokens:
+            print("❌ No user token available for referral tests")
+            return False
+            
+        all_success = True
+        
+        # Test get referral stats
+        success1, response = self.run_test(
+            "Get referral stats",
+            "GET",
+            "referral/stats",
+            200,
+            auth_user='user'
+        )
+        
+        if success1:
+            referral_code = response.get('referral_code')
+            print(f"   ✅ User referral code: {referral_code}")
+        
+        # Test list referrals
+        success2, _ = self.run_test(
+            "List user referrals",
+            "GET",
+            "referral/list",
+            200,
+            auth_user='user'
+        )
+        
+        return all_success and success1 and success2
+
+    def test_encryption_system(self):
+        """Test E2EE encryption system"""
+        print("\n" + "="*50)
+        print("TESTING E2EE ENCRYPTION")
+        print("="*50)
+        
+        if 'user' not in self.tokens:
+            print("❌ No user token available for encryption tests")
+            return False
+            
+        all_success = True
+        
+        # Test generate encryption keys
+        success1, response = self.run_test(
+            "Generate encryption keys",
+            "POST",
+            "encryption/keys/generate",
+            200,
+            auth_user='user'
+        )
+        
+        if success1:
+            print(f"   ✅ Generated identity key and {response.get('prekey_count', 0)} prekeys")
+            
+            # Test get user prekey bundle
+            user_id = self.user_ids.get('creator')
+            if user_id:
+                success2, _ = self.run_test(
+                    "Get user prekey bundle",
+                    "GET",
+                    f"encryption/keys/{user_id}",
+                    200,
+                    auth_user='user'
+                )
+                all_success = all_success and success2
+        
+        return all_success and success1
+
+    def test_stripe_connect(self):
+        """Test Stripe Connect functionality for creators"""
+        print("\n" + "="*50)
+        print("TESTING STRIPE CONNECT")
+        print("="*50)
+        
+        if 'creator' not in self.tokens:
+            print("❌ No creator token available for Stripe Connect tests")
+            return False
+            
+        all_success = True
+        
+        # Test Stripe Connect setup
+        success1, response = self.run_test(
+            "Setup Stripe Connect",
+            "POST",
+            "creator/stripe-connect/setup",
+            200,
+            auth_user='creator'
+        )
+        
+        if success1:
+            account_id = response.get('account_id')
+            print(f"   ✅ Stripe Connect account: {account_id}")
+            
+            # Test get Stripe Connect status
+            success2, _ = self.run_test(
+                "Get Stripe Connect status",
+                "GET",
+                "creator/stripe-connect/status",
+                200,
+                auth_user='creator'
+            )
+            all_success = all_success and success2
+        
+        return all_success and success1
+
     def run_all_tests(self):
         """Run all test suites"""
         print("🚀 Starting PRIVÉ API Testing")
