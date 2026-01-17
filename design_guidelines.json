@@ -1,0 +1,148 @@
+{
+  "brand_identity": {
+    "name": "PRIVÉ",
+    "tagline": "The Inner Circle of Creator Content",
+    "archetype": "The Digital Vault (Luxury + Security)",
+    "emotional_tone": "Exclusive, Discreet, Expensive, Secure, Cinematic",
+    "visual_metaphor": "A black titanium credit card floating in a dark room."
+  },
+  "typography": {
+    "headings": {
+      "font_family": "Playfair Display, serif",
+      "weights": ["400", "600"],
+      "usage": "Landing page heroes, section titles, creator names. Use tracking-tight.",
+      "fallback": "serif"
+    },
+    "body": {
+      "font_family": "Manrope, sans-serif",
+      "weights": ["300", "400", "500"],
+      "usage": "General UI, chat, descriptions, settings.",
+      "fallback": "sans-serif"
+    },
+    "mono": {
+      "font_family": "JetBrains Mono, monospace",
+      "weights": ["400"],
+      "usage": "Encryption keys, transaction IDs, verification badges, tiny overlines.",
+      "fallback": "monospace"
+    }
+  },
+  "colors": {
+    "palette": {
+      "background": {
+        "default": "#020202",
+        "paper": "#09090B",
+        "subtle": "#18181B"
+      },
+      "foreground": {
+        "default": "#EDEDED",
+        "muted": "#A1A1AA",
+        "subtle": "#52525B"
+      },
+      "primary": {
+        "default": "#D4AF37",
+        "hover": "#FCD34D",
+        "foreground": "#000000",
+        "description": "Metallic Gold. Use strictly for conversion actions (Subscribe, Tip, Unlock)."
+      },
+      "secondary": {
+        "default": "#10B981",
+        "foreground": "#FFFFFF",
+        "description": "Emerald Green. Use ONLY for trust signals: 'Verified', 'Encrypted', 'Secure'."
+      },
+      "accent": {
+        "default": "#27272A",
+        "foreground": "#FAFAFA"
+      },
+      "border": {
+        "default": "rgba(255, 255, 255, 0.08)",
+        "active": "rgba(212, 175, 55, 0.3)"
+      }
+    },
+    "gradients": {
+      "gold_rush": "linear-gradient(135deg, #D4AF37 0%, #AA8A2E 100%)",
+      "obsidian_glass": "linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.0) 100%)",
+      "security_glow": "radial-gradient(circle at center, rgba(16, 185, 129, 0.15) 0%, transparent 70%)"
+    }
+  },
+  "visual_enhancers": {
+    "glassmorphism": {
+      "default": "backdrop-blur-xl bg-black/40 border border-white/10",
+      "heavy": "backdrop-blur-2xl bg-black/80 border border-white/5",
+      "interactive": "hover:bg-white/5 transition-colors duration-300"
+    },
+    "borders": {
+      "subtle": "1px solid rgba(255, 255, 255, 0.08)",
+      "gold_trace": "1px solid rgba(212, 175, 55, 0.3)"
+    },
+    "shadows": {
+      "glow": "0 0 20px -5px rgba(212, 175, 55, 0.15)",
+      "deep": "0 24px 48px -12px rgba(0, 0, 0, 0.8)"
+    },
+    "textures": {
+      "noise": "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E\")"
+    }
+  },
+  "layout_strategies": {
+    "marketing": {
+      "grid": "The Tetris Grid",
+      "description": "Asymmetric layouts. Large hero visuals (60%) vs tight typography (40%). Overlapping elements.",
+      "spacing": "Massive. py-32 for sections. gap-12 for grids."
+    },
+    "dashboard": {
+      "grid": "The Bento Grid",
+      "description": "Dense, data-rich, but separated by 'glass' borders. No white backgrounds. Everything is dark grey on black.",
+      "spacing": "Tight. p-6 for cards. gap-4 for grid."
+    }
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-[#D4AF37] text-black font-semibold hover:bg-[#FCD34D] rounded-none uppercase tracking-widest text-xs px-8 py-4 transition-all",
+      "secondary": "bg-transparent border border-white/20 text-white hover:border-white/50 rounded-none uppercase tracking-widest text-xs px-8 py-4",
+      "ghost": "text-zinc-400 hover:text-white uppercase tracking-widest text-xs"
+    },
+    "cards": {
+      "creator": "relative overflow-hidden bg-zinc-900/30 border border-white/10 hover:border-[#D4AF37]/50 transition-all group",
+      "stat": "bg-zinc-900/20 border border-white/5 p-6 flex flex-col justify-between"
+    },
+    "inputs": {
+      "default": "bg-black/50 border-white/10 focus:border-[#D4AF37] text-white placeholder:text-zinc-600 rounded-none h-12"
+    }
+  },
+  "image_assets": {
+    "hero_models": [
+      {
+        "url": "https://images.unsplash.com/photo-1763906803356-c4c2c83dc012?crop=entropy&cs=srgb&fm=jpg&q=85",
+        "alt": "Mysterious woman in veil - Hero Section",
+        "category": "hero"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1762635696772-0ed637b1a3a7?crop=entropy&cs=srgb&fm=jpg&q=85",
+        "alt": "Elegant fashion model - Creator Spotlight",
+        "category": "creator"
+      }
+    ],
+    "textures": [
+      {
+        "url": "https://images.pexels.com/photos/11167645/pexels-photo-11167645.jpeg",
+        "alt": "Abstract dark lines - Security Background",
+        "category": "background"
+      }
+    ]
+  },
+  "instructions_to_main_agent": [
+    "1. INSTALL FONTS: Add '@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400&family=Manrope:wght@300;400;500;600&family=Playfair+Display:wght@400;600&display=swap');' to index.css immediately.",
+    "2. TAILWIND CONFIG: Update tailwind.config.js to include the custom colors (gold, obsidian) and font families defined above.",
+    "3. NO ROUNDED CORNERS: This brand is 'Sharp'. Use 'rounded-none' or 'rounded-sm' max. No 'rounded-xl'.",
+    "4. DARK MODE ONLY: Force dark mode. Do not implement a light mode toggle. The brand is exclusively dark.",
+    "5. USE SHADCN: Use the existing shadcn components but override their styles using the 'components' classes defined above.",
+    "6. PRIVACY FIRST: Every sensitive data point (earnings, messages) should have a 'blur' toggle or mask by default.",
+    "7. ANIMATION: Use 'framer-motion' for smooth fade-ins. No bouncy animations. Only ease-out-expo."
+  ],
+  "universal_guidelines": [
+    "Do not use gradients for text.",
+    "Do not use 'Inter' font for headings.",
+    "Always add 'data-testid' to interactive elements.",
+    "Use 'sonner' for toasts.",
+    "Ensure all text has sufficient contrast (WCAG AA) against the dark background."
+  ]
+}
