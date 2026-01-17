@@ -1722,7 +1722,7 @@ async def create_content(
     media_urls: List[str] = Body([]),
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user["role"] != UserRole.CREATOR:
+    if current_user["role"] not in [UserRole.CREATOR, "creator"]:
         raise HTTPException(status_code=403, detail="Only creators can post content")
     
     creator = await db.creators.find_one({"user_id": current_user["id"]}, {"_id": 0})
@@ -1734,8 +1734,8 @@ async def create_content(
         "creator_id": creator["id"],
         "title": title,
         "description": description,
-        "content_type": content_type,
-        "price": price if content_type == ContentType.PPV else None,
+        "content_type": content_type.value if hasattr(content_type, 'value') else content_type,
+        "price": price if (content_type == ContentType.PPV or content_type == "ppv") else None,
         "media_urls": media_urls,
         "thumbnail_url": media_urls[0] if media_urls else None,
         "is_pinned": False,
